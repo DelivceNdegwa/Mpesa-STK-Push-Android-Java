@@ -16,6 +16,7 @@ import android.Manifest;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -34,6 +35,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.Calendar;
+import java.util.Date;
 
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -204,6 +207,14 @@ public class MainActivity extends AppCompatActivity {
                 smsManager.sendTextMessage(phoneNumber, null, message, null, null);
                 Toast.makeText(getApplicationContext(), "Message Sent",
                         Toast.LENGTH_LONG).show();
+
+                Date currentTime = Calendar.getInstance().getTime();
+
+                Intent intent = new Intent(MainActivity.this, PdfActivity.class);
+                intent.putExtra("PHONE_NUMBER", phoneNumber);
+                intent.putExtra("AMOUNT", etAmount.getText().toString());
+                intent.putExtra("MESSAGE", "Invoked STKPush at "+currentTime);
+
             } catch (Exception ex) {
                 Toast.makeText(getApplicationContext(),ex.getMessage().toString(),
                         Toast.LENGTH_LONG).show();
