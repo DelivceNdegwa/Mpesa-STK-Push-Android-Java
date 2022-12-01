@@ -4,13 +4,22 @@ import static com.delivce.m_pesaintegration.Constants.BUSINESS_SHORT_CODE;
 import static com.delivce.m_pesaintegration.Constants.CALLBACKURL;
 import static com.delivce.m_pesaintegration.Constants.PARTYB;
 import static com.delivce.m_pesaintegration.Constants.PASSKEY;
+import static com.delivce.m_pesaintegration.Constants.SMS_PERMISSION_REQUEST_CODE;
 import static com.delivce.m_pesaintegration.Constants.TRANSACTION_TYPE;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
+import android.Manifest;
+import android.app.AlertDialog;
 import android.app.ProgressDialog;
+import android.content.DialogInterface;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.telephony.SmsManager;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -20,6 +29,11 @@ import com.delivce.m_pesaintegration.models.AccessToken;
 import com.delivce.m_pesaintegration.models.STKPush;
 import com.delivce.m_pesaintegration.services.DarajaApiClient;
 import com.google.android.material.textfield.TextInputEditText;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.IOException;
 
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -35,6 +49,8 @@ public class MainActivity extends AppCompatActivity {
 
     public boolean isReady = false;
 
+    String phoneNumber;
+    String invokeMessage = "STKPush invoked";
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -51,24 +67,60 @@ public class MainActivity extends AppCompatActivity {
 
         getAccessToken();
 
+
         btnSendAmount.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if(!isReady){
-                    getAccessToken();
-                    performSTKPush(
-                            etPhoneNumber.getText().toString(),
-                            etAmount.getText().toString()
-                    );
-                }
-                else{
-                    performSTKPush(
-                            etPhoneNumber.getText().toString(),
-                            etAmount.getText().toString()
-                    );
-                }
+                promptConfirmation();
             }
         });
+    }
+
+
+    private void requestSmsPermission(String message, String phoneNumber) {
+
+        // check permission is given
+        if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            // request permission (see result in onRequestPermissionsResult() method)
+            ActivityCompat.requestPermissions(MainActivity.this,
+                    new String[]{Manifest.permission.SEND_SMS},
+                    SMS_PERMISSION_REQUEST_CODE);
+        } else {
+            // permission already granted run sms send
+            sendSMS(message, phoneNumber);
+        }
+    }
+
+    private void promptConfirmation() {
+        phoneNumber = etPhoneNumber.getText().toString();
+        AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+        builder.setMessage("Send amount "+etAmount.getText().toString()+" from number "+etPhoneNumber.getText().toString()+"?");
+        builder.setTitle("Confirmation");
+        builder.setCancelable(false);
+        builder.setPositiveButton("Yes", (DialogInterface.OnClickListener) (dialog, which) -> {
+            if(!isReady){
+                getAccessToken();
+                performSTKPush(
+                        etPhoneNumber.getText().toString(),
+                        etAmount.getText().toString()
+                );
+            }
+            else{
+                performSTKPush(
+                        etPhoneNumber.getText().toString(),
+                        etAmount.getText().toString()
+                );
+            }
+
+        });
+
+        builder.setNegativeButton("No", (DialogInterface.OnClickListener) (dialog, which) -> {
+            Toast.makeText(this, "You have cancelled this order", Toast.LENGTH_SHORT).show();
+            dialog.cancel();
+        });
+
+        AlertDialog alertDialog = builder.create();
+        alertDialog.show();
     }
 
     private void getAccessToken() {
@@ -76,13 +128,18 @@ public class MainActivity extends AppCompatActivity {
         mApiClient.mpesaService().getAccessToken().enqueue(new Callback<AccessToken>() {
             @Override
             public void onResponse(Call<AccessToken> call, Response<AccessToken> response) {
-                if(response.isSuccessful()){
-                    mApiClient.setAuthToken(response.body().getAccessToken());
-                    isReady = true;
-                }
-                else{
-                    Log.d("E_STK_RES", String.valueOf(response.errorBody()));
-                    Toast.makeText(MainActivity.this, "Something went wrong", Toast.LENGTH_SHORT).show();
+                try {
+                    if (response.isSuccessful()) {
+                        mApiClient.setAuthToken(response.body().getAccessToken());
+                        isReady = true;
+                    } else {
+                        Timber.e("Response %s", response.errorBody().string());
+                        Toast.makeText(MainActivity.this, BuildConfig.CONSUMER_KEY, Toast.LENGTH_SHORT).show();
+                        Log.d("CONSUMER_KEY", BuildConfig.CONSUMER_KEY);
+                        Log.d("CONSUMER_SECRET", BuildConfig.CONSUMER_SECRET);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
             }
 
@@ -107,7 +164,7 @@ public class MainActivity extends AppCompatActivity {
                 TRANSACTION_TYPE,
                 String.valueOf(amount),
                 Utils.sanitizePhoneNumber(phone_number),
-                "0701766206", // PARTY_B,
+                PARTYB,
                 Utils.sanitizePhoneNumber(phone_number),
                 CALLBACKURL,
                 "Test Supplier", //Account reference
@@ -124,6 +181,7 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     if (response.isSuccessful()) {
                         Timber.d("post submitted to API. %s", response.body());
+                        requestSmsPermission("STK Push invoked", phone_number);
                     } else {
                         Timber.e("Response %s", response.errorBody().string());
                     }
@@ -140,4 +198,34 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void sendSMS(String message, String phoneNumber) {
+            try {
+                SmsManager smsManager = SmsManager.getDefault();
+                smsManager.sendTextMessage(phoneNumber, null, message, null, null);
+                Toast.makeText(getApplicationContext(), "Message Sent",
+                        Toast.LENGTH_LONG).show();
+            } catch (Exception ex) {
+                Toast.makeText(getApplicationContext(),ex.getMessage().toString(),
+                        Toast.LENGTH_LONG).show();
+                Log.d("SEND_SMS_ERROR", ex.getMessage().toString());
+                ex.printStackTrace();
+            }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        switch(requestCode){
+            case(SMS_PERMISSION_REQUEST_CODE): {
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    // permission was granted
+                    sendSMS(invokeMessage, phoneNumber);
+                } else {
+                    // permission denied
+                    Toast.makeText(this, "Sorry, you have to grant this app sms permissions", Toast.LENGTH_LONG).show();
+                }
+                return;
+            }
+        }
+    }
 }
